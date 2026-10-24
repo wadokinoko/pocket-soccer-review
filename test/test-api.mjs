@@ -71,6 +71,21 @@ env.DB._raw.exec(`UPDATE matches SET opened_at=opened_at-200 WHERE mid='${mid2}'
 await call('POST', '/api/match/report', { mid: mid2, hs: 9, gs: 0 }, a);
 ok((await call('POST', '/api/match/report', { mid: mid2, hs: 0, gs: 2 }, b)).j.status === 'disputed', 'mismatching reports → disputed, no points');
 ok((await call('GET', '/api/me', null, a)).j.me.games === 1, 'disputed match not counted');
+// transaction rollback / retry after a failed stats update
+const midFail = hex(8);
+await call('POST', '/api/match/open', { mid: midFail, guest: b.id, len: 120 }, a);
+env.DB._raw.exec(`UPDATE matches SET opened_at=opened_at-200 WHERE mid='${midFail}'`);
+await call('POST', '/api/match/report', { mid: midFail, hs: 2, gs: 0 }, a);
+env.DB._raw.exec(`CREATE TRIGGER fail_guest_stats BEFORE UPDATE ON players WHEN OLD.id='${b.id}' AND NEW.games > OLD.games BEGIN SELECT RAISE(ABORT, 'forced test failure'); END`);
+const failedFinalize = await call('POST', '/api/match/report', { mid: midFail, hs: 2, gs: 0 }, b);
+ok(failedFinalize.s === 500, 'forced stats failure surfaces as server error');
+ok((await call('GET', '/api/match/' + midFail, null, a)).j.status === 'waiting', 'failed transaction rolls match status back');
+ok((await call('GET', '/api/me', null, a)).j.me.games === 1, 'failed transaction rolls player stats back');
+env.DB._raw.exec('DROP TRIGGER fail_guest_stats');
+const retryFinalize = await call('POST', '/api/match/report', { mid: midFail, hs: 2, gs: 0 }, b);
+ok(retryFinalize.j.status === 'done', 'retry finalizes after transient failure');
+ok((await call('GET', '/api/me', null, a)).j.me.games === 2, 'retry applies player stats exactly once');
+
 // guest unregistered / invalid
 ok((await call('POST', '/api/match/open', { mid: hex(8), guest: mkId(), len: 120 }, a)).s === 404, 'unregistered guest rejected');
 ok((await call('POST', '/api/match/report', { mid, hs: 99, gs: 0 }, a)).s === 400, 'score range');
