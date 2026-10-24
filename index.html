@@ -1450,7 +1450,7 @@ function finish(){
   if(!G.net&&!G.chal){const r=bnMatch(a,b,gain);gain=r.gain;bx=r.txt;}
   SV.coin+=gain;saveSV();
   $('rewardTxt').textContent='コイン +'+gain+'(所持 '+SV.coin+')'+bx+(a>b?(()=>{const m=ulWin();return m?'  '+m:'';})():'');
-  try{socAfterMatch(a,b);}catch(e){}
+  try{socAfterMatch(a,b);}catch(e){}if(G.net&&G.rankMid&&/^[0-9a-f]{16}$/.test(G.rankMid))document.dispatchEvent(new CustomEvent('ps:rank-match-finish',{detail:{role:G.net.role,mid:G.rankMid,hostScore:G.score[0],guestScore:G.score[1],playerId:getPlayerId()}}));
   if(G.lg){try{lgFinish(a,b);}catch(e){console.error(e);}}
   renderRec();
   show(overView);
@@ -1597,6 +1597,7 @@ function beginMatch(){
   G.diff=Math.min(+document.querySelector('input[name=diff]:checked').value,cpuUL());
   G.len=+document.querySelector('input[name=len]:checked').value;
   G.clock=G.len;G.score=[0,0];G.ht=G.et=0;G.pk=null;G.rpDone=0;G.rg=null;G.lkT=0;G.lkGoals=0;G.lkNext=20+Math.random()*30;
+  G.rankMid=null;
   if(!G.lg)$('menuBtn').textContent='設定に戻る';
   if(G.net&&G.net.role==='guest')return;
   G.tm1=G.lg?G.lg.opp:G.chal?teamById(G.chal.tid):G.net&&G.net.gr?teamById(G.net.gr.team):oppTeam();
@@ -1606,7 +1607,7 @@ function beginMatch(){
   show(null);
   banner('キックオフ','',1.3);
   hud(true);
-  if(G.net)netSend({t:'start',pid:getPlayerId(),len:G.len,tn:[G.tm0n=teamById(SV.team).n,G.tm1.n],n:G.players.map(q=>[q.name,q.nat||'JPN',q.ovr])});
+  if(G.net){if(G.net.role==='host'){G.rankMid=Array.from(crypto.getRandomValues(new Uint8Array(8)),b=>b.toString(16).padStart(2,'0')).join('');document.dispatchEvent(new CustomEvent('ps:rank-match-start',{detail:{role:'host',mid:G.rankMid,hostId:getPlayerId(),guestId:(G.net.gr&&G.net.gr.pid)||NS.opPid||'',len:G.len}}));}netSend({t:'start',pid:getPlayerId(),mid:G.rankMid||'',len:G.len,tn:[G.tm0n=teamById(SV.team).n,G.tm1.n],n:G.players.map(q=>[q.name,q.nat||'JPN',q.ovr])});}
 }
 function releaseKeys(){IN.up=IN.down=IN.left=IN.right=IN.rotL=IN.rotR=false;IN.kickHeld=false;IN.kickRelease=false;G.charge=0;IN.tx=IN.ty=0;
   try{sid=null;kid=null;knob.style.transform='';}catch(e){}}   // also clears the touch stick / kick pointer so nothing stays 'held'
@@ -3192,7 +3193,7 @@ function netMsg(m){
   }
   if(m.t==='start'){
     if(!validStart(m))return;
-    NS.opPid=m.pid;G.me=1;G.len=m.len;G.clock=m.len;G.score=[0,0];setup();
+    NS.opPid=m.pid;G.me=1;G.rankMid=/^[0-9a-f]{16}$/.test(m.mid||'')?m.mid:null;G.len=m.len;G.clock=m.len;G.score=[0,0];setup();if(G.rankMid)document.dispatchEvent(new CustomEvent('ps:rank-match-start',{detail:{role:'guest',mid:G.rankMid,hostId:m.pid,guestId:getPlayerId(),len:m.len}}));
     m.n.forEach((a,i)=>{const p=P[i]||G.players[i];if(!p)return;p.name=cleanStr(a[0],24,'');p.nat=cleanStr(a[1],3,'JPN');p.ovr=Math.max(1,Math.min(250,+a[2]||1));});
     placeTeams(0);G.ctrl1=null;G.state='kickoff';
     $('nmA').textContent=cleanStr(m.tn[0],24,'相手');$('nmB').textContent=cleanStr(m.tn[1],24,'あなた')+'(あなた)';
@@ -4002,6 +4003,11 @@ window.claude?.hot?.ready?window.claude.hot.ready(boot):boot(window.claude?.hot?
  $('psSocialLoadRank').addEventListener('click',async()=>{try{const d=await api('/api/ranking?limit=50');const list=$('psSocialRanking');list.textContent='';if(!d.list?.length){list.textContent='ランキングはまだ空だよ。対戦成績が登録されると表示されるよ。';return}d.list.forEach(p=>{const li=document.createElement('li');li.textContent='#'+p.rank+' '+p.name+' · '+p.rating+'pt · '+p.wins+'勝 '+p.draws+'分 '+p.losses+'敗';list.appendChild(li)});say('ランキングを更新したよ。')}catch(e){say('ランキングを読めなかった: '+e.message)}});
  $('psSocialSearchBtn').addEventListener('click',async()=>{try{needAuth();const q=$('psSocialSearch').value.trim();const d=await api('/api/search?q='+encodeURIComponent(q));const ul=$('psSocialSearchResults');ul.textContent='';(d.results||d.list||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+') ';const b=document.createElement('button');b.textContent='フレンド申請';b.onclick=async()=>{try{await api('/api/friend/request',{method:'POST',body:JSON.stringify({to:p.id})});say('フレンド申請を送ったよ！')}catch(e){say('申請できなかった: '+e.message)}};li.appendChild(b);ul.appendChild(li)});if(!ul.children.length)ul.textContent='プレイヤーが見つからなかったよ。';}catch(e){say('検索できなかった: '+e.message)}});
  $('psSocialLoadFriends').addEventListener('click',async()=>{try{needAuth();const d=await api('/api/friends');const f=$('psSocialFriends'),inc=$('psSocialIncoming');f.textContent='';inc.textContent='';(d.friends||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+')'+(p.online?' · オンライン':'');f.appendChild(li)});(d.incoming||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+') ';const b=document.createElement('button');b.textContent='承認';b.onclick=async()=>{try{await api('/api/friend/respond',{method:'POST',body:JSON.stringify({from:p.id,accept:true})});say('フレンドになったよ！');$('psSocialLoadFriends').click()}catch(e){say('承認できなかった: '+e.message)}};li.appendChild(b);inc.appendChild(li)});if(!f.children.length)f.textContent='まだフレンドはいないよ。';if(!inc.children.length)inc.textContent='届いた申請はないよ。';say('フレンド情報を更新したよ。')}catch(e){say('フレンドを読めなかった: '+e.message)}});
+ const rankOpen=new Map();
+ const validPid=x=>typeof x==='string'&&/^PS-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/.test(x);
+ document.addEventListener('ps:rank-match-start',async ev=>{const d=ev.detail||{};if(!auth||auth.id!==localPlayerId()||(auth.id!==d.hostId&&auth.id!==d.guestId)||!/^[0-9a-f]{16}$/.test(d.mid||''))return;if(d.role!=='host')return;if(!validPid(d.guestId)||d.guestId===d.hostId){say('ランキング記録をスキップ: 相手の登録IDを確認できないよ。');return}const p=api('/api/match/open',{method:'POST',body:JSON.stringify({mid:d.mid,guest:d.guestId,len:d.len})});rankOpen.set(d.mid,p);try{await p;say('ランキング対象の対戦を登録したよ。')}catch(e){rankOpen.delete(d.mid);say('試合登録できずランキング対象外: '+e.message)}});
+ async function sendRankReport(d){if(!auth||auth.id!==localPlayerId()||auth.id!==d.playerId)return;const body={mid:d.mid,hs:d.hostScore,gs:d.guestScore};let last;for(let i=0;i<3;i++){try{if(d.role==='host'&&rankOpen.has(d.mid))await rankOpen.get(d.mid);const r=await api('/api/match/report',{method:'POST',body:JSON.stringify(body)});if(r.status==='done')say('ランキング反映！ レート '+r.rating+' / 変動 '+(r.delta>0?'+':'')+r.delta);else if(r.status==='waiting')say('結果を送信したよ。相手の報告待ち！');else if(r.status==='capped')say('この組み合わせの本日のランキング上限に達したよ。');else if(r.status==='disputed')say('スコア不一致のためランキングに反映されなかったよ。');else say('試合結果: '+r.status);return}catch(e){last=e;if(i<2)await new Promise(r=>setTimeout(r,900*(i+1)))}}say('結果を送れなかったよ: '+(last?.message||'エラー'))}
+ document.addEventListener('ps:rank-match-finish',ev=>{const d=ev.detail||{};if(/^[0-9a-f]{16}$/.test(d.mid||'')&&Number.isInteger(d.hostScore)&&Number.isInteger(d.guestScore))sendRankReport(d).catch(e=>say('報告エラー: '+e.message))});
  if(auth&&auth.id===localPlayerId()){$('psSocialName').value='';}
 })();
 </script>
