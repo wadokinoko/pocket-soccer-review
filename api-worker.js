@@ -379,24 +379,34 @@ async function matchReport(request, env) {
 
 async function finalize(env, m, hs, gs, viewer) {
   const t = now();
-  const cnt = await env.DB.prepare("SELECT COUNT(*) AS n FROM matches WHERE pair=? AND status='done' AND done_at>?").bind(pairKey(m.host, m.guest), t - 86400).first().catch(() => null);
+  const pair = pairKey(m.host, m.guest);
+  const cnt = await env.DB.prepare("SELECT COUNT(*) AS n FROM matches WHERE pair=? AND status='done' AND done_at>?")
+    .bind(pair, t - 86400).first().catch(() => null);
   const capped = cnt ? cnt.n >= PAIR_DAILY_CAP : false;
-  // 二重登録防止: status='open' のものだけを1回だけ確定させる
-  const claim = await env.DB.prepare('UPDATE matches SET status=?,hs=?,gs=?,done_at=?,pair=? WHERE mid=? AND status=\'open\'')
-    .bind(capped ? 'capped' : 'done', hs, gs, t, pairKey(m.host, m.guest), m.mid).run();
-  const fresh = await env.DB.prepare('SELECT * FROM matches WHERE mid=?').bind(m.mid).first();
-  if (!claim.meta.changes || capped) return matchStatusOf(env, fresh, viewer);
+  if (capped) {
+    await env.DB.prepare("UPDATE matches SET status='capped',hs=?,gs=?,done_at=?,pair=? WHERE mid=? AND status='open'")
+      .bind(hs, gs, t, pair, m.mid).run();
+    return matchStatusOf(env, await env.DB.prepare('SELECT * FROM matches WHERE mid=?').bind(m.mid).first(), viewer);
+  }
+
   const H = await env.DB.prepare('SELECT rating FROM players WHERE id=?').bind(m.host).first();
   const G = await env.DB.prepare('SELECT rating FROM players WHERE id=?').bind(m.guest).first();
+  if (!H || !G) throw new HttpErr(404, 'player_missing');
   const sh = hs > gs ? 1 : hs < gs ? 0 : 0.5;
   const dh = eloDelta(H.rating, G.rating, sh), dg = eloDelta(G.rating, H.rating, 1 - sh);
-  const upd = 'UPDATE players SET rating=MAX(?,rating+?),wins=wins+?,losses=losses+?,draws=draws+?,games=games+1,updated_at=? WHERE id=?';
+  const upd = "UPDATE players SET rating=MAX(?,rating+?),wins=wins+?,losses=losses+?,draws=draws+?,games=games+1,updated_at=? WHERE id=? AND EXISTS (SELECT 1 FROM matches WHERE mid=? AND status='done' AND dh IS NULL)";
+  // D1 batch is transactional: claim, both player updates, and stored deltas either all commit or all roll back.
+  // dh IS NULL also lets a retry repair a previously claimed match whose stats transaction failed.
   await env.DB.batch([
-    env.DB.prepare(upd).bind(MIN_RATING, dh, sh === 1 ? 1 : 0, sh === 0 ? 1 : 0, sh === 0.5 ? 1 : 0, t, m.host),
-    env.DB.prepare(upd).bind(MIN_RATING, dg, sh === 0 ? 1 : 0, sh === 1 ? 1 : 0, sh === 0.5 ? 1 : 0, t, m.guest),
-    env.DB.prepare('UPDATE matches SET dh=?,dg=? WHERE mid=?').bind(dh, dg, m.mid),
+    env.DB.prepare("UPDATE matches SET status='done',hs=?,gs=?,done_at=?,pair=? WHERE mid=? AND status='open'")
+      .bind(hs, gs, t, pair, m.mid),
+    env.DB.prepare(upd).bind(MIN_RATING, dh, sh === 1 ? 1 : 0, sh === 0 ? 1 : 0, sh === 0.5 ? 1 : 0, t, m.host, m.mid),
+    env.DB.prepare(upd).bind(MIN_RATING, dg, sh === 0 ? 1 : 0, sh === 1 ? 1 : 0, sh === 0.5 ? 1 : 0, t, m.guest, m.mid),
+    env.DB.prepare("UPDATE matches SET dh=?,dg=? WHERE mid=? AND status='done' AND dh IS NULL")
+      .bind(dh, dg, m.mid),
   ]);
-  return matchStatusOf(env, await env.DB.prepare('SELECT * FROM matches WHERE mid=?').bind(m.mid).first(), viewer);
+  const fresh = await env.DB.prepare('SELECT * FROM matches WHERE mid=?').bind(m.mid).first();
+  return matchStatusOf(env, fresh, viewer);
 }
 
 async function matchStatusOf(env, m, viewer) {
