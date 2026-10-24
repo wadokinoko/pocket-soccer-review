@@ -3903,4 +3903,107 @@ window.claude?.hot?.ready?window.claude.hot.ready(boot):boot(window.claude?.hot?
 })();
 </script>
 
+
+<!-- Social API staging UI: isolated from the existing game and WebSocket code -->
+<style>
+#psSocialFab{position:fixed;right:14px;bottom:14px;z-index:9998;border:0;border-radius:999px;padding:12px 16px;background:#152b48;color:#fff;font-weight:800;box-shadow:0 4px 18px #0003}
+#psSocialShade{position:fixed;inset:0;z-index:9999;background:#0008;display:none;align-items:flex-end;justify-content:center}
+#psSocialPanel{background:#fff;color:#172033;width:min(720px,100%);max-height:88dvh;overflow:auto;border-radius:18px 18px 0 0;padding:18px;box-sizing:border-box;font:14px system-ui,sans-serif}
+#psSocialPanel input,#psSocialPanel textarea,#psSocialPanel select{box-sizing:border-box;max-width:100%;padding:9px;border:1px solid #ccd3df;border-radius:8px;font:inherit}
+#psSocialPanel input,#psSocialPanel textarea{width:100%}
+#psSocialPanel button{cursor:pointer;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;padding:8px 11px;font:inherit}
+#psSocialPanel .psRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+#psSocialPanel .psRow input{flex:1;min-width:120px}
+#psSocialPanel .psCard{border:1px solid #e0e5ed;border-radius:12px;padding:12px;margin:10px 0}
+#psSocialPanel .psMuted{color:#64748b;font-size:12px}
+#psSocialPanel .psStatus{padding:9px;background:#f1f5f9;border-radius:8px;overflow-wrap:anywhere}
+#psSocialPanel h2{margin:0 0 8px} #psSocialPanel h3{margin:16px 0 6px}
+</style>
+<button id="psSocialFab" type="button">🌐 オンライン機能</button>
+<div id="psSocialShade" role="dialog" aria-modal="true" aria-label="オンライン機能">
+ <div id="psSocialPanel">
+  <div class="psRow" style="justify-content:space-between"><h2>ポケットサッカー オンライン</h2><button id="psSocialClose" type="button">閉じる ✕</button></div>
+  <p class="psMuted">ランキング・プロフィール・サーバーフレンド。既存の試合画面やWebSocket通信とは独立した追加パネルだよ。</p>
+  <div id="psSocialStatus" class="psStatus" aria-live="polite">サーバーに接続する準備中…</div>
+  <section class="psCard">
+   <h3>アカウント</h3>
+   <p class="psMuted">初回は登録、同じブラウザーでは保存した認証情報で再接続するよ。別端末への移行機能はまだないよ。</p>
+   <label>プレイヤー名（12文字以内）<input id="psSocialName" maxlength="12" placeholder="プレイヤー名"></label>
+   <div class="psRow"><button id="psSocialRegister" type="button">登録 / 接続</button><button id="psSocialRefresh" type="button">自分の情報を更新</button></div>
+   <div id="psSocialMe" class="psMuted">未接続</div>
+  </section>
+  <section class="psCard">
+   <h3>プロフィール編集</h3>
+   <label>表示名<input id="psSocialEditName" maxlength="12" placeholder="表示名"></label>
+   <label>自己紹介（80文字以内）<textarea id="psSocialBio" maxlength="80" rows="2" placeholder="自己紹介"></textarea></label>
+   <div class="psRow"><label>アイコン <select id="psSocialAvatar"></select></label><button id="psSocialSaveProfile" type="button">プロフィールを保存</button></div>
+  </section>
+  <section class="psCard">
+   <div class="psRow" style="justify-content:space-between"><h3>ランキング</h3><button id="psSocialLoadRank" type="button">更新</button></div>
+   <ol id="psSocialRanking"><li>「更新」を押して読み込んでね。</li></ol>
+  </section>
+  <section class="psCard">
+   <h3>フレンド検索・申請</h3>
+   <div class="psRow"><input id="psSocialSearch" placeholder="プレイヤー名またはID"><button id="psSocialSearchBtn" type="button">検索</button></div>
+   <ul id="psSocialSearchResults"></ul>
+   <h3>フレンド一覧</h3><button id="psSocialLoadFriends" type="button">フレンドを更新</button>
+   <ul id="psSocialFriends"></ul>
+   <h3>届いた申請</h3><ul id="psSocialIncoming"></ul>
+  </section>
+  <p class="psMuted">※サーバー側APIのデプロイ前は接続エラーになるよ。既存のゲームやオンライン対戦には影響しない。</p>
+ </div>
+</div>
+<script>
+(function(){
+ const API='https://mute-star-1515.kerotowado.workers.dev';
+ const STORE='pocketSoccerSocialAuth_v1';
+ const $=id=>document.getElementById(id);
+ const shade=$('psSocialShade'), status=$('psSocialStatus');
+ let auth=null;
+ try{auth=JSON.parse(localStorage.getItem(STORE)||'null')}catch(e){}
+ const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+ function randomHex(n){const b=new Uint8Array(n);crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,'0')).join('')}
+ function makeId(){let x='';const b=new Uint8Array(8);crypto.getRandomValues(b);for(const v of b)x+=chars[v%chars.length];return 'PS-'+x.slice(0,4)+'-'+x.slice(4)}
+ function localPlayerId(){const k='pocketSoccer11v11_playerId_v1';let id=localStorage.getItem(k);if(!id){id=makeId();localStorage.setItem(k,id)}return id}
+ function say(t){status.textContent=t}
+ async function api(path, opts={}){
+  const headers={'Content-Type':'application/json',...(opts.headers||{})};
+  if(auth)headers.Authorization='Bearer '+auth.id+'.'+auth.secret;
+  let r;
+  try{r=await fetch(API+path,{...opts,headers})}catch(e){throw new Error('サーバーに接続できないよ。APIのデプロイ後にもう一度試してね。')}
+  let data={};try{data=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(data.message||data.error||('HTTP '+r.status));
+  return data;
+ }
+ function show(){shade.style.display='flex';document.body.style.overflow='hidden'}
+ function hide(){shade.style.display='none';document.body.style.overflow=''}
+ $('psSocialFab').addEventListener('click',show);$('psSocialClose').addEventListener('click',hide);
+ shade.addEventListener('click',e=>{if(e.target===shade)hide()});
+ for(let i=0;i<24;i++){const o=document.createElement('option');o.value=i;o.textContent='アイコン '+(i+1);$('psSocialAvatar').appendChild(o)}
+ function needAuth(){if(!auth)throw new Error('先に「登録 / 接続」を押してね')}
+ function renderMe(m){
+  if(!m)return;
+  $('psSocialMe').textContent='ID: '+m.id+' / レート: '+(m.rating??1000)+' / '+(m.games??0)+'試合';
+  $('psSocialEditName').value=m.name||'';$('psSocialName').value=m.name||'';
+  $('psSocialBio').value=m.bio||'';$('psSocialAvatar').value=String(m.avatar||0);
+ }
+ async function connect(){
+  const id=localPlayerId();
+  if(!auth||auth.id!==id)auth={id,secret:randomHex(32)};
+  localStorage.setItem(STORE,JSON.stringify(auth));
+  const d=await api('/api/register',{method:'POST',body:JSON.stringify({id:auth.id,secret:auth.secret,name:$('psSocialName').value.trim()||'名無しプレイヤー'})});
+  renderMe(d.me);say(d.created?'アカウントを作成したよ！':'登録済みアカウントに接続したよ！');
+  await refreshMe();
+ }
+ async function refreshMe(){needAuth();const d=await api('/api/me');renderMe(d.me);say('接続中。IDとプロフィールを読み込んだよ。')}
+ $('psSocialRegister').addEventListener('click',async()=>{try{say('接続中…');await connect()}catch(e){say('接続できなかった: '+e.message)}});
+ $('psSocialRefresh').addEventListener('click',async()=>{try{await refreshMe()}catch(e){say('更新できなかった: '+e.message)}});
+ $('psSocialSaveProfile').addEventListener('click',async()=>{try{needAuth();const d=await api('/api/profile',{method:'POST',body:JSON.stringify({name:$('psSocialEditName').value.trim(),bio:$('psSocialBio').value,avatar:Number($('psSocialAvatar').value)})});renderMe(d.me);say('プロフィールを保存したよ！')}catch(e){say('保存できなかった: '+e.message)}});
+ $('psSocialLoadRank').addEventListener('click',async()=>{try{const d=await api('/api/ranking?limit=50');const list=$('psSocialRanking');list.textContent='';if(!d.list?.length){list.textContent='ランキングはまだ空だよ。対戦成績が登録されると表示されるよ。';return}d.list.forEach(p=>{const li=document.createElement('li');li.textContent='#'+p.rank+' '+p.name+' · '+p.rating+'pt · '+p.wins+'勝 '+p.draws+'分 '+p.losses+'敗';list.appendChild(li)});say('ランキングを更新したよ。')}catch(e){say('ランキングを読めなかった: '+e.message)}});
+ $('psSocialSearchBtn').addEventListener('click',async()=>{try{needAuth();const q=$('psSocialSearch').value.trim();const d=await api('/api/search?q='+encodeURIComponent(q));const ul=$('psSocialSearchResults');ul.textContent='';(d.results||d.list||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+') ';const b=document.createElement('button');b.textContent='フレンド申請';b.onclick=async()=>{try{await api('/api/friend/request',{method:'POST',body:JSON.stringify({to:p.id})});say('フレンド申請を送ったよ！')}catch(e){say('申請できなかった: '+e.message)}};li.appendChild(b);ul.appendChild(li)});if(!ul.children.length)ul.textContent='プレイヤーが見つからなかったよ。';}catch(e){say('検索できなかった: '+e.message)}});
+ $('psSocialLoadFriends').addEventListener('click',async()=>{try{needAuth();const d=await api('/api/friends');const f=$('psSocialFriends'),inc=$('psSocialIncoming');f.textContent='';inc.textContent='';(d.friends||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+')'+(p.online?' · オンライン':'');f.appendChild(li)});(d.incoming||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+') ';const b=document.createElement('button');b.textContent='承認';b.onclick=async()=>{try{await api('/api/friend/respond',{method:'POST',body:JSON.stringify({from:p.id,accept:true})});say('フレンドになったよ！');$('psSocialLoadFriends').click()}catch(e){say('承認できなかった: '+e.message)}};li.appendChild(b);inc.appendChild(li)});if(!f.children.length)f.textContent='まだフレンドはいないよ。';if(!inc.children.length)inc.textContent='届いた申請はないよ。';say('フレンド情報を更新したよ。')}catch(e){say('フレンドを読めなかった: '+e.message)}});
+ if(auth&&auth.id===localPlayerId()){$('psSocialName').value='';}
+})();
+</script>
+
 </body></html>
