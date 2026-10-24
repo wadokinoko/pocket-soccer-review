@@ -1,0 +1,27 @@
+
+name: Pocket Soccer API Tests
+
+on:
+  push:
+    branches:
+      - feature/all-social-api
+  pull_request:
+    branches:
+      - feature/all-social-api
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get repository files
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run API tests
+        run: node --no-warnings test/test-api.mjs
