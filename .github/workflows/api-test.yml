@@ -25,3 +25,6 @@ jobs:
 
       - name: Run API tests
         run: node --no-warnings test/test-api.mjs
+
+      - name: Check online ranking HTML integration
+        run: node --no-warnings test/test-social-integration.mjs
