@@ -20,3 +20,14 @@ const checks = [
 ];
 for (const [label, needle] of checks) assert.ok(html.includes(needle), label);
 console.log(`HTML integration checks passed: ${scripts.length} inline scripts parsed, ${checks.length} integration assertions passed.`);
+
+const apiSource = readFileSync(new URL('../api-worker.js', import.meta.url), 'utf8');
+const contracts = [
+  ['frontend match ID format matches API validation', /MID_RE\s*=\s*\/\^\[0-9a-f\]\{16\}\$\//.test(apiSource) && html.includes("/^[0-9a-f]{16}$/.test(G.rankMid")],
+  ['game duration options match API allowlist', /const LENS = \[120, 180, 300\]/.test(apiSource) && ['value="120"', 'value="180"', 'value="300"'].every(v => html.includes(v))],
+  ['match open payload contains required guest and duration', /body:JSON\.stringify\(\{mid:d\.mid,guest:d\.guestId,len:d\.len\}\)/.test(html)],
+  ['reports use canonical host and guest scores', /hostScore:G\.score\[0\],guestScore:G\.score\[1\]/.test(html) && /hs:d\.hostScore,gs:d\.guestScore/.test(html)],
+  ['API verifies both players belong to the match', /m\.host !== p\.id && m\.guest !== p\.id/.test(apiSource)],
+];
+for (const [label, passed] of contracts) assert.ok(passed, label);
+console.log(`Cross-file contract checks passed: ${contracts.length} API/frontend assertions.`);
