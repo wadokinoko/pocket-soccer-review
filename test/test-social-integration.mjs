@@ -9,7 +9,7 @@ for (const [i, script] of scripts.entries()) {
   catch (e) { throw new Error(`inline script #${i + 1} has a syntax error: ${e.message}`); }
 }
 const checks = [
-  ['malformed saved auth secret is regenerated', "typeof auth.secret!=='string'||!/^[0-9a-f]{64}$/.test(auth.secret)"],
+  ['malformed saved auth secret is rejected instead of silently replaced', "if(typeof auth.secret!=='string'||!/^[0-9a-f]{64}$/.test(auth.secret))throw new Error('保存された認証情報が壊れているよ。秘密鍵は復元できないため、既存アカウントには接続できないよ。');"],
   ['match ID resets for new matches', 'G.rankMid=null'],
   ['host creates a match ID', 'G.rankMid=Array.from(crypto.getRandomValues'],
   ['match ID is sent to guest', 'mid:G.rankMid||\'\''],
