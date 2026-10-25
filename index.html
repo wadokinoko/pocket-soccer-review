@@ -3990,7 +3990,8 @@ window.claude?.hot?.ready?window.claude.hot.ready(boot):boot(window.claude?.hot?
  }
  async function connect(){
   const id=localPlayerId();
-  if(!auth||auth.id!==id||typeof auth.secret!=='string'||!/^[0-9a-f]{64}$/.test(auth.secret))auth={id,secret:randomHex(32)};
+  if(!auth||auth.id!==id)auth={id,secret:randomHex(32)};
+  if(typeof auth.secret!=='string'||!/^[0-9a-f]{64}$/.test(auth.secret))throw new Error('保存された認証情報が壊れているよ。秘密鍵は復元できないため、既存アカウントには接続できないよ。');
   localStorage.setItem(STORE,JSON.stringify(auth));
   const d=await api('/api/register',{method:'POST',body:JSON.stringify({id:auth.id,secret:auth.secret,name:$('psSocialName').value.trim()||'名無しプレイヤー'})});
   renderMe(d.me);say(d.created?'アカウントを作成したよ！':'登録済みアカウントに接続したよ！');
