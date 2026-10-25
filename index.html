@@ -4031,7 +4031,7 @@ window.claude?.hot?.ready?window.claude.hot.ready(boot):boot(window.claude?.hot?
      let ready=false;
      for(let j=0;j<6;j++){
       try{await api('/api/match/'+encodeURIComponent(d.mid));ready=true;break}
-      catch(e){if(!String(e.message).includes('HTTP 404'))throw e;await new Promise(r=>setTimeout(r,700))}
+      catch(e){const msg=String(e.message);if(!msg.includes('HTTP 404')&&!msg.includes('not_found'))throw e;await new Promise(r=>setTimeout(r,700))}
      }
      if(!ready)throw new Error('ホストの試合登録を確認できなかったよ');
     }
