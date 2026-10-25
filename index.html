@@ -4003,11 +4003,53 @@ window.claude?.hot?.ready?window.claude.hot.ready(boot):boot(window.claude?.hot?
  $('psSocialLoadRank').addEventListener('click',async()=>{try{const d=await api('/api/ranking?limit=50');const list=$('psSocialRanking');list.textContent='';if(!d.list?.length){list.textContent='ランキングはまだ空だよ。対戦成績が登録されると表示されるよ。';return}d.list.forEach(p=>{const li=document.createElement('li');li.textContent='#'+p.rank+' '+p.name+' · '+p.rating+'pt · '+p.wins+'勝 '+p.draws+'分 '+p.losses+'敗';list.appendChild(li)});say('ランキングを更新したよ。')}catch(e){say('ランキングを読めなかった: '+e.message)}});
  $('psSocialSearchBtn').addEventListener('click',async()=>{try{needAuth();const q=$('psSocialSearch').value.trim();const d=await api('/api/search?q='+encodeURIComponent(q));const ul=$('psSocialSearchResults');ul.textContent='';(d.results||d.list||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+') ';const b=document.createElement('button');b.textContent='フレンド申請';b.onclick=async()=>{try{await api('/api/friend/request',{method:'POST',body:JSON.stringify({to:p.id})});say('フレンド申請を送ったよ！')}catch(e){say('申請できなかった: '+e.message)}};li.appendChild(b);ul.appendChild(li)});if(!ul.children.length)ul.textContent='プレイヤーが見つからなかったよ。';}catch(e){say('検索できなかった: '+e.message)}});
  $('psSocialLoadFriends').addEventListener('click',async()=>{try{needAuth();const d=await api('/api/friends');const f=$('psSocialFriends'),inc=$('psSocialIncoming');f.textContent='';inc.textContent='';(d.friends||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+')'+(p.online?' · オンライン':'');f.appendChild(li)});(d.incoming||[]).forEach(p=>{const li=document.createElement('li');li.textContent=p.name+' ('+p.id+') ';const b=document.createElement('button');b.textContent='承認';b.onclick=async()=>{try{await api('/api/friend/respond',{method:'POST',body:JSON.stringify({from:p.id,accept:true})});say('フレンドになったよ！');$('psSocialLoadFriends').click()}catch(e){say('承認できなかった: '+e.message)}};li.appendChild(b);inc.appendChild(li)});if(!f.children.length)f.textContent='まだフレンドはいないよ。';if(!inc.children.length)inc.textContent='届いた申請はないよ。';say('フレンド情報を更新したよ。')}catch(e){say('フレンドを読めなかった: '+e.message)}});
- const rankOpen=new Map();
+ const rankOpen=new Map(),rankOpenFailed=new Set();
  const validPid=x=>typeof x==='string'&&/^PS-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/.test(x);
- document.addEventListener('ps:rank-match-start',async ev=>{const d=ev.detail||{};if(!auth||auth.id!==localPlayerId()||(auth.id!==d.hostId&&auth.id!==d.guestId)||!/^[0-9a-f]{16}$/.test(d.mid||''))return;if(d.role!=='host')return;if(!validPid(d.guestId)||d.guestId===d.hostId){say('ランキング記録をスキップ: 相手の登録IDを確認できないよ。');return}const p=api('/api/match/open',{method:'POST',body:JSON.stringify({mid:d.mid,guest:d.guestId,len:d.len})});rankOpen.set(d.mid,p);try{await p;say('ランキング対象の対戦を登録したよ。')}catch(e){rankOpen.delete(d.mid);say('試合登録できずランキング対象外: '+e.message)}});
- async function sendRankReport(d){if(!auth||auth.id!==localPlayerId()||auth.id!==d.playerId)return;const body={mid:d.mid,hs:d.hostScore,gs:d.guestScore};let last;for(let i=0;i<3;i++){try{if(d.role==='host'&&rankOpen.has(d.mid))await rankOpen.get(d.mid);const r=await api('/api/match/report',{method:'POST',body:JSON.stringify(body)});if(r.status==='done')say('ランキング反映！ レート '+r.rating+' / 変動 '+(r.delta>0?'+':'')+r.delta);else if(r.status==='waiting')say('結果を送信したよ。相手の報告待ち！');else if(r.status==='capped')say('この組み合わせの本日のランキング上限に達したよ。');else if(r.status==='disputed')say('スコア不一致のためランキングに反映されなかったよ。');else say('試合結果: '+r.status);return}catch(e){last=e;if(i<2)await new Promise(r=>setTimeout(r,900*(i+1)))}}say('結果を送れなかったよ: '+(last?.message||'エラー'))}
- document.addEventListener('ps:rank-match-finish',ev=>{const d=ev.detail||{};if(/^[0-9a-f]{16}$/.test(d.mid||'')&&Number.isInteger(d.hostScore)&&Number.isInteger(d.guestScore))sendRankReport(d).catch(e=>say('報告エラー: '+e.message))});
+ document.addEventListener('ps:rank-match-start',async ev=>{
+  const d=ev.detail||{};
+  if(!auth||auth.id!==localPlayerId()||(auth.id!==d.hostId&&auth.id!==d.guestId)||!/^[0-9a-f]{16}$/.test(d.mid||''))return;
+  if(d.role!=='host')return;
+  if(!validPid(d.guestId)||d.guestId===d.hostId){rankOpenFailed.add(d.mid);say('ランキング記録をスキップ: 相手の登録IDを確認できないよ。');return}
+  const p=api('/api/match/open',{method:'POST',body:JSON.stringify({mid:d.mid,guest:d.guestId,len:d.len})});
+  rankOpen.set(d.mid,p);
+  try{await p;say('ランキング対象の対戦を登録したよ。')}
+  catch(e){rankOpenFailed.add(d.mid);say('試合登録できずランキング対象外: '+e.message)}
+ });
+ async function sendRankReport(d){
+  if(!auth||auth.id!==localPlayerId()||auth.id!==d.playerId)return;
+  if(rankOpenFailed.has(d.mid)){say('試合登録に失敗したため、この試合はランキング対象外だよ。');return}
+  const body={mid:d.mid,hs:d.hostScore,gs:d.guestScore};
+  let last;
+  for(let i=0;i<8;i++){
+   try{
+    if(d.role==='host'){
+     const opening=rankOpen.get(d.mid);
+     if(!opening)throw new Error('試合登録を確認できないよ');
+     await opening;
+    }else{
+     // ゲスト側ではホストの登録APIが終わる前に試合が終わる可能性があるため、登録を確認してから報告する
+     let ready=false;
+     for(let j=0;j<6;j++){
+      try{await api('/api/match/'+encodeURIComponent(d.mid));ready=true;break}
+      catch(e){if(!String(e.message).includes('HTTP 404'))throw e;await new Promise(r=>setTimeout(r,700))}
+     }
+     if(!ready)throw new Error('ホストの試合登録を確認できなかったよ');
+    }
+    const r=await api('/api/match/report',{method:'POST',body:JSON.stringify(body)});
+    if(r.status==='done')say('ランキング反映！ レート '+r.rating+' / 変動 '+(r.delta>0?'+':'')+r.delta);
+    else if(r.status==='waiting')say('結果を送信したよ。相手の報告待ち！');
+    else if(r.status==='capped')say('この組み合わせの本日のランキング上限に達したよ。');
+    else if(r.status==='disputed')say('スコア不一致のためランキングに反映されなかったよ。');
+    else say('試合結果: '+r.status);
+    return;
+   }catch(e){last=e;if(i<7)await new Promise(r=>setTimeout(r,900*(i+1)))}
+  }
+  say('結果を送れなかったよ: '+(last?.message||'エラー'));
+ }
+ document.addEventListener('ps:rank-match-finish',ev=>{
+  const d=ev.detail||{};
+  if(/^[0-9a-f]{16}$/.test(d.mid||'')&&Number.isInteger(d.hostScore)&&Number.isInteger(d.guestScore))sendRankReport(d).catch(e=>say('報告エラー: '+e.message));
+ });
  if(auth&&auth.id===localPlayerId()){$('psSocialName').value='';}
 })();
 </script>
