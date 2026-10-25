@@ -1,0 +1,10 @@
+# Staging only. Replace the placeholder database_id with a NEW staging D1 ID.
+# Never point this config at the production D1 database.
+name = "pocket-soccer-social-staging"
+main = "staging-worker.js"
+compatibility_date = "2026-10-24"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pocket-soccer-social-staging-db"
+database_id = "REPLACE_WITH_STAGING_D1_DATABASE_ID"
